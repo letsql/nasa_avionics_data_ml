@@ -10,7 +10,6 @@ from attrs import (
     frozen,
 )
 from attrs.validators import (
-    deep_iterable,
     instance_of,
 )
 
@@ -24,39 +23,53 @@ default_pdir = pathlib.Path("/mnt/nasa-data-download/data/Tail_666_1_parquet/")
 @frozen
 class Config:
     n_rand_loops = field(validator=instance_of(int), default=3)
-    restart = field(validator=instance_of(int), default=0)
     n_files = field(validator=instance_of(int), default=3)
     batch_size = field(validator=instance_of(int), default=50_000)
-    seq_lengths = field(validator=deep_iterable(instance_of(int)), default=(8, 8, 16, 16, 16, 16, 16, 32))
-    l_rates = field(validator=deep_iterable(instance_of(float)), default=(0.01, 0.05, 0.01, 0.01, 0.03, 0.05, 0.05, 0.05))
-    epochs = field(validator=deep_iterable(instance_of(int)), default=(1000, 1000, 1000, 1000, 1000, 1000, 1000, 1000))
-    n_h_units = field(validator=deep_iterable(instance_of(int)), default=(10, 20, 10, 15, 20, 20, 25, 20))
-    n_h_layers = field(validator=deep_iterable(instance_of(int)), default=(1, 1, 1, 2, 1, 1, 1, 1))
+    seq_length = field(validator=instance_of(int), default=8)
+    l_rate = field(validator=instance_of(float), default=0.01)
+    epoch = field(validator=instance_of(int), default=1000)
+    n_h_unit = field(validator=instance_of(int), default=10)
+    n_h_layer = field(validator=instance_of(int), default=1)
     pdir = field(validator=instance_of(pathlib.Path), converter=pathlib.Path, default=default_pdir)
     train_frac = field(validator=instance_of(float), default=2/3)
 
     def __attrs_post_init__(self):
         if not self.pdir.exists():
             raise ValueError
-        (length, *others) = map(
-            len,
-            (getattr(self, attr) for attr in (
-                "seq_lengths", "l_rates", "epochs", "n_h_units", "n_h_layers",
-            )),
-        )
-        if not all(other == length for other in others):
-            raise ValueError
 
     @classmethod
-    def get_debug_config(cls):
-        return cls(
+    def get_debug_configs(cls):
+        fixed = dict(
             n_rand_loops=1,
             n_files=3,
-            seq_lengths=(8,8),
-            l_rates=(.01, .05),
-            epochs=(150, 150),
-            n_h_units=(10, 10),
-            n_h_layers=(1, 1),
+        )
+        varying = dict(
+            seq_length=(8,8),
+            l_rate=(.01, .05),
+            epoch=(150, 150),
+            n_h_unit=(10, 10),
+            n_h_layer=(1, 1),
+        )
+        yield from (
+            cls(
+                **dict(zip(varying.keys(), values)),
+                **fixed,
+            )
+            for values in zip(*varying.values())
+        )
+
+    @classmethod
+    def get_default_configs(cls):
+        varying = dict(
+            seq_length=(8, 8, 16, 16, 16, 16, 16, 32),
+            l_rate=(0.01, 0.05, 0.01, 0.01, 0.03, 0.05, 0.05, 0.05),
+            epoch=(1000, 1000, 1000, 1000, 1000, 1000, 1000, 1000),
+            n_h_unit=(10, 20, 10, 15, 20, 20, 25, 20),
+            n_h_layer=(1, 1, 1, 2, 1, 1, 1, 1),
+        )
+        yield from (
+            cls(**dict(zip(varying.keys(), values)))
+            for values in zip(*varying.values())
         )
 
     @property
@@ -122,7 +135,7 @@ def get_paths(pdir, n, seed=0):
     return paths
 
 
-config = Config.get_debug_config()
+(config, *_) = configs = tuple(Config.get_debug_configs())
 set_device(config)
 print_cuda_settings()
 
@@ -139,14 +152,14 @@ print(
 avg_error_train_list = []
 avg_error_test_list = []
 # loop through all the different configurations
-for c in range(config.restart, len(config.seq_lengths)):
-    seq_length = config.seq_lengths[c]
-    learning_rate = config.l_rates[c]
-    n_epochs = config.epochs[c]
-    hidden_units = config.n_h_units[c]
-    n_hidden_layers = config.n_h_layers[c]
+for (config_i, config) in enumerate(configs):
+    seq_length = config.seq_length
+    learning_rate = config.l_rate
+    n_epochs = config.epoch
+    hidden_units = config.n_h_unit
+    n_hidden_layers = config.n_h_layer
 
-    print(f"\n\n\n----------------------\nConfiguration #{c}\n----------------------")
+    print(f"\n\n\n----------------------\nConfiguration #{config_i}\n----------------------")
     print(f"seq_length:{seq_length}")
     print(f"learning_rate:{learning_rate}")
     print(f"n_epochs:{n_epochs}")
