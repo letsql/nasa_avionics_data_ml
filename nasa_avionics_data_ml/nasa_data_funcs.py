@@ -78,8 +78,8 @@ def strip_n_fill(df, outliers=False, add_elev=False, VRTG=True, airborne_only=Fa
             "LONP",
         ]
 
-        Tdf = df[Tlist].interpolate(method=method).bfill(axis=0)
-        Xdf = df[Xlist].interpolate(method=method).bfill(axis=0)  # saving some space
+        Tdf = df[Tlist].ffill().bfill()
+        Xdf = df[Xlist].ffill().bfill()
 
         # using the Isolation Forest model to remove outliers in some of the data
         # contamination values that have been manually chosen
@@ -176,8 +176,8 @@ def strip_n_fill(df, outliers=False, add_elev=False, VRTG=True, airborne_only=Fa
         # first limit the dataframe to only the columns listed above
         # after interpolation backfill all NaN's at the beginning of the datafile. The NaNs at the end are handled
         # with the interpolation technique
-        Tdf = df[Tlist].interpolate(method=method).bfill(axis=0)
-        Xdf = df[Xlist].interpolate(method=method).bfill(axis=0)  # saving some space
+        Tdf = df[Tlist].ffill().bfill()
+        Xdf = df[Xlist].ffill().bfill()
 
     # reset the index and remove the extra column it creates.
     Xdf.reset_index(inplace=True)
@@ -508,9 +508,7 @@ def read_parquet_batch(
 
 
 def read_parquet_flight_merge(
-    cwd,
-    fdir,
-    file_list,
+    paths,
     seq_length,
     scaleX=None,
     scaleT=None,
@@ -527,13 +525,11 @@ def read_parquet_flight_merge(
 
     # creating the training set
     # initialize these dataframes
-    Xdf = pd.DataFrame()
-    Tdf = pd.DataFrame()
+    (Xs, Ts) = ((), ())
     # print('Reading Training Files:')
-    for file in file_list:
+    for path in paths:
         # print(f'file:{file}')
-        pname = os.path.join(cwd, fdir, file)
-        df = pd.read_parquet(path=pname)
+        df = pd.read_parquet(path=path)
 
         Xdfnew, Tdfnew = strip_n_fill(
             df,
@@ -544,9 +540,11 @@ def read_parquet_flight_merge(
         )
 
         # combine all training dataframes
-        Xdf = Xdf.append(Xdfnew)
-        Tdf = Tdf.append(Tdfnew)
+        Xs += (Xdfnew,)
+        Ts += (Tdfnew,)
 
+    Xdf = pd.concat(Xs)
+    Tdf = pd.concat(Ts)
     # reset the index and remove the extra column it creates.
     Xdf.reset_index(inplace=True)
     Xdf.pop("index")
