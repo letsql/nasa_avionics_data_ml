@@ -8,7 +8,7 @@ import gc
 import torch
 
 
-def strip_n_fill(df, outliers=False, add_elev=False, VRTG=True, airborne_only=False):
+def strip_n_fill(df, xlist, tlist, outliers=False, add_elev=False, VRTG=True, airborne_only=False):
     """This function only keeps the variables that appear to be needed.
     1. It strips extra data out of the file
     2. fills in NaNs
@@ -16,9 +16,6 @@ def strip_n_fill(df, outliers=False, add_elev=False, VRTG=True, airborne_only=Fa
     4. if add_elev is true then call the function to add elevation for each lat/lon
     5. if VRTG = False then this will exclude VRTG, LATG, and LONG in the input.
     """
-
-    # output value to model with NN
-    Tlist = ["ALT"]
 
     # remove data when it's on the ground before padding any other data.
     # this is done since the NSQT switch has a periodic 0 signal when airborne and I don't want to pad
@@ -32,35 +29,8 @@ def strip_n_fill(df, outliers=False, add_elev=False, VRTG=True, airborne_only=Fa
 
     # list of what I think are the dependent variables to create a model for T.
     # Removed the LONG, LATG, VRTG acceleration measurements that had period noise in it
-    Xlist = [
-        "time",
-        "RALT",
-        "PSA",
-        "PI",
-        "PT",
-        "ALTR",
-        "IVV",
-        "VSPS",
-        "FPAC",
-        "BLAC",
-        "CTAC",
-        "TAS",
-        "CAS",
-        "GS",
-        "CASS",
-        "WS",
-        "PTCH",
-        "ROLL",
-        "DA",
-        "TAT",
-        "SAT",
-        "LATP",
-        "LONP",
-    ]
-    if outliers or VRTG:
-        Xlist += ["LATG", "LONG", "VRTG"]
-    Tdf = df[Tlist].ffill().bfill()
-    Xdf = df[Xlist].ffill().bfill()
+    Tdf = df[tlist].ffill().bfill()
+    Xdf = df[xlist].ffill().bfill()
     if outliers:
         for name, cont in (
             ("VRTG", float(0.03)),
@@ -283,6 +253,8 @@ def sliding_window(X, T, TIME, seq_length):
 def read_parquet_flight_merge(
     paths,
     seq_length,
+    xlist,
+    tlist,
     scaleX=None,
     scaleT=None,
     outliers=False,
@@ -306,6 +278,8 @@ def read_parquet_flight_merge(
 
         Xdfnew, Tdfnew = strip_n_fill(
             df,
+            xlist,
+            tlist,
             outliers=outliers,
             add_elev=add_elev,
             VRTG=VRTG,

@@ -10,6 +10,7 @@ from attrs import (
     frozen,
 )
 from attrs.validators import (
+    deep_iterable,
     instance_of,
 )
 
@@ -18,6 +19,32 @@ from nasa_avionics_data_ml.LSTM import LSTM
 
 
 default_pdir = pathlib.Path("/mnt/nasa-data-download/data/Tail_666_1_parquet/")
+default_t_names = ("ALT",)
+base_x_names = (
+    "time",
+    "RALT",
+    "PSA",
+    "PI",
+    "PT",
+    "ALTR",
+    "IVV",
+    "VSPS",
+    "FPAC",
+    "BLAC",
+    "CTAC",
+    "TAS",
+    "CAS",
+    "GS",
+    "CASS",
+    "WS",
+    "PTCH",
+    "ROLL",
+    "DA",
+    "TAT",
+    "SAT",
+    "LATP",
+    "LONP",
+)
 
 
 @frozen
@@ -31,11 +58,27 @@ class Config:
     n_h_unit = field(validator=instance_of(int), default=10)
     n_h_layer = field(validator=instance_of(int), default=1)
     pdir = field(validator=instance_of(pathlib.Path), converter=pathlib.Path, default=default_pdir)
+    t_names = field(validator=deep_iterable(instance_of(str), instance_of(tuple)), default=default_t_names)
+    x_names = field(validator=deep_iterable(instance_of(str), instance_of(tuple)), init=False)
+    airborne_only = field(validator=instance_of(bool), default=True)
+    vrtg = field(validator=instance_of(bool), default=True)
     train_frac = field(validator=instance_of(float), default=2/3)
 
     def __attrs_post_init__(self):
         if not self.pdir.exists():
             raise ValueError
+        x_names = base_x_names
+        if self.airborne_only or self.vrtb:
+            x_names += ("LATG", "LONG", "VRTG")
+        object.__setattr__(self, "x_names", x_names)
+
+    @property
+    def xlist(self):
+        return list(self.x_names)
+
+    @property
+    def tlist(self):
+        return list(self.t_names)
 
     @classmethod
     def get_debug_configs(cls):
@@ -78,16 +121,123 @@ class Config:
         return tuple(p for p in self.pdir.iterdir() if p.suffix == ".parquet")[:self.n_files]
 
     def get_train_paths(self, seed):
+        # shuffle the files around in this list to get different results for the bootstrapping
         paths = shuffle(list(self.paths), seed)
         n_train = int(len(paths) * self.train_frac)
         train_paths = paths[:n_train]
         return train_paths
 
+    def get_train_data(self, seed, **kwargs):
+        train_paths = self.get_train_paths(seed=seed)
+        Xtraindf, Ttraindf, Timetrain, scaleX, scaleT = ndf.read_parquet_flight_merge(
+            train_paths,
+            self.seq_length,
+            self.xlist,
+            self.tlist,
+            **kwargs
+        )
+        return Xtraindf, Ttraindf, Timetrain, scaleX, scaleT
+
     def get_test_paths(self, seed):
+        # shuffle the files around in this list to get different results for the bootstrapping
         paths = shuffle(list(self.paths), seed)
         n_train = int(len(paths) * self.train_frac)
         test_paths = paths[n_train:]
         return test_paths
+
+    def get_test_data(self, seed, **kwargs):
+        test_paths = self.get_test_paths(seed=seed)
+        Xtestdf, Ttestdf, Timetest, scaleX, scaleT = ndf.read_parquet_flight_merge(
+            test_paths,
+            self.seq_length,
+            self.xlist,
+            self.tlist,
+            **kwargs
+        )
+        return Xtestdf, Ttestdf, Timetest, scaleX, scaleT
+
+    def get_model(self):
+        model = LSTM(
+            len(self.x_names),
+            len(self.t_names),
+            self.n_h_unit,
+            self.n_h_layer,
+            self.device,
+        )
+        model = model.to(self.device)
+        return model
+
+    def train_model(self, seed, scaleX=None, scaleT=None, **read_kwargs):
+        Xtraindf, Ttraindf, _, scaleX, scaleT = self.get_train_data(
+            seed=seed,
+            scaleX=scaleX,
+            scaleT=scaleT,
+            **read_kwargs,
+        )
+        model = self.get_model()
+        loss_func = torch.nn.MSELoss()
+        opt = torch.optim.Adam(model.parameters(), lr=self.l_rate)
+        error_trace = []
+        for _ in range(self.epoch):
+            for _, (X, T) in enumerate(
+                ndf.get_batch(Xtraindf, Ttraindf, batch_size=self.batch_size)
+            ):
+                # create tensors from the data frames
+                Xtrain = torch.from_numpy(X.astype(np.float32)).to(self.device)
+                Ttrain = torch.from_numpy(T.astype(np.float32)).to(self.device)
+
+                ##run input forward through model
+                train_output = model(Xtrain)
+
+                # zero out gradients of optimized torch.Tensors to zero before back-propagation happens
+                opt.zero_grad()
+
+                # calculate the loss of the model output (Y) to the training Target (Ttrain)
+                loss = loss_func(train_output, Ttrain)
+
+                # back-propagation of the loss
+                loss.backward()
+
+                # performs a single optimization step (parameter update)
+                opt.step()
+
+                # keeping track of the history of the error in order to plot the convergence.
+                error_trace.append(loss.detach().cpu())
+
+        # do the last batch one last time
+        loss = loss_func(train_output, Ttrain).detach().cpu()
+        error_train = loss.item()
+        torch.cuda.empty_cache()
+        return (
+            model,
+            scaleX,
+            scaleT,
+            loss_func,
+            opt,
+            error_trace,
+            error_train,
+        )
+
+    def test_model(self, seed, scaleX, scaleT, model, loss_func, **read_kwargs):
+        Xtestdf, Ttestdf, _, scaleX, scaleT = self.get_test_data(
+            seed=seed,
+            scaleX=scaleX,
+            scaleT=scaleT,
+            **read_kwargs,
+        )
+
+        # create tensors from the data frames
+        Xtest = torch.from_numpy(Xtestdf.astype(np.float32)).to(self.device)
+        Ttest = torch.from_numpy(Ttestdf.astype(np.float32)).to(self.device)
+
+        # Run the test data through the trained model
+        test_output = model(Xtest)
+        # calculate the loss of the model output (Y) to the training Target (Ttrain)
+        loss = loss_func(test_output, Ttest).detach().cpu()
+
+        error_test = loss.item()
+        torch.cuda.empty_cache()
+        return error_test
 
     @property
     @functools.cache
@@ -153,136 +303,41 @@ avg_error_train_list = []
 avg_error_test_list = []
 # loop through all the different configurations
 for (config_i, config) in enumerate(configs):
-    seq_length = config.seq_length
-    learning_rate = config.l_rate
-    n_epochs = config.epoch
-    hidden_units = config.n_h_unit
-    n_hidden_layers = config.n_h_layer
-
     print(f"\n\n\n----------------------\nConfiguration #{config_i}\n----------------------")
-    print(f"seq_length:{seq_length}")
-    print(f"learning_rate:{learning_rate}")
-    print(f"n_epochs:{n_epochs}")
-    print(f"hidden_units:{hidden_units}")
-    print(f"n_hidden_layers:{n_hidden_layers}")
+    print(f"seq_length:{config.seq_length}")
+    print(f"learning_rate:{config.l_rate}")
+    print(f"n_epochs:{config.epoch}")
+    print(f"hidden_units:{config.n_h_unit}")
+    print(f"n_hidden_layers:{config.n_h_layer}")
     print(f"n_files:{config.n_files}\n-----------------")
 
-    avg_error_train = 0
-    avg_error_test = 0
+    sum_error_train = 0
+    sum_error_test = 0
     # bootstrap loop
     for rf in range(config.n_rand_loops):
-        # shuffle the files around in this list to get different results for the bootstrapping
-        train_paths = config.get_train_paths(seed=rf)
-
         # print('Loading Data...')
-        Xtraindf, Ttraindf, Timetrain, scaleX, scaleT = ndf.read_parquet_flight_merge(
-            train_paths,
-            seq_length,
-            scaleX=None,
-            scaleT=None,
-            VRTG=True,
-            airborne_only=True,
-        )
-
-        ## Training
-        # ----------------------------------
-
-        # varibles described at the beginning of this notebook.
-        # number of samples, samples per sequence, components per sample
-        N, S, I = Xtraindf.shape
-        O = Ttraindf.shape[1]
-        n_input = I
-        n_out = O
-
-        # calling the LSTM definition above and initializing the model
-        model = LSTM(n_input, n_out, hidden_units, n_hidden_layers, config.device)
-        # set computational resource to the "device"
-        model = model.to(config.device)
-
-        # Define the loss function used to calculate the difference between the model output and the training Target
-        loss_func = torch.nn.MSELoss()
-
-        # optimization function
-        opt = torch.optim.Adam(model.parameters(), lr=learning_rate)
-
-        error_trace = []
-
-        # training the model
-        # print('Training the Model...')
-        for epoch in range(n_epochs):
-            for i, (X, T) in enumerate(
-                ndf.get_batch(Xtraindf, Ttraindf, batch_size=config.batch_size)
-            ):
-                # create tensors from the data frames
-                Xtrain = torch.from_numpy(X.astype(np.float32)).to(**config.to_kwargs)
-                Ttrain = torch.from_numpy(T.astype(np.float32)).to(**config.to_kwargs)
-
-                ##run input forward through model
-                train_output = model(Xtrain)
-
-                # zero out gradients of optimized torch.Tensors to zero before back-propagation happens
-                opt.zero_grad()
-
-                # calculate the loss of the model output (Y) to the training Target (Ttrain)
-                loss = loss_func(train_output, Ttrain)
-
-                # back-propagation of the loss
-                loss.backward()
-
-                # performs a single optimization step (parameter update)
-                opt.step()
-
-                # keeping track of the history of the error in order to plot the convergence.
-                error_trace.append(loss.detach().cpu())
-
-        # do the last batch one last time
-        loss = loss_func(train_output, Ttrain).detach().cpu()
-        avg_error_train += loss.item()
-
-        # print('after epoch loop')
-        #!nvidia-smi
-
-        del Xtrain, Ttrain, train_output, loss
-        torch.cuda.empty_cache()
-        # print('after epoch loop delete')
-        #!nvidia-smi
+        read_kwargs = {"VRTG": True, "airborne_only": True}
+        (model, scaleX, scaleT, loss_func, opt, error_trace, error_train) = config.train_model(seed=rf, **read_kwargs)
+        sum_error_train += error_train
 
         # testing the model
         # --------------------------
         # print('Testing the Model...')
-        test_paths = config.get_test_paths(seed=rf)
-        Xtestdf, Ttestdf, Timetest, scaleX, scaleT = ndf.read_parquet_flight_merge(
-            test_paths,
-            seq_length,
-            scaleX=scaleX,
-            scaleT=scaleT,
-            VRTG=True,
-            airborne_only=True,
+        error_test = config.test_model(
+            seed=rf, scaleX=scaleX, scaleT=scaleT, model=model, loss_func=loss_func, **read_kwargs,
         )
-
-        # create tensors from the data frames
-        Xtest = torch.from_numpy(Xtestdf.astype(np.float32)).to(**config.to_kwargs)
-        Ttest = torch.from_numpy(Ttestdf.astype(np.float32)).to(**config.to_kwargs)
-
-        # Run the test data through the trained model
-        test_output = model(Xtest)
-        # calculate the loss of the model output (Y) to the training Target (Ttrain)
-        loss = loss_func(test_output, Ttest).detach().cpu()
-
-        avg_error_test += loss.item()
-
-        del Xtest, Ttest, test_output, loss
-        torch.cuda.empty_cache()
+        sum_error_test += error_test
         # print('after test delete')
         #!nvidia-smi
 
     # calculating error over all the random runs
-    avg_error_train = avg_error_train / config.n_rand_loops
+    avg_error_train = sum_error_train / config.n_rand_loops
     avg_error_train_list.append(avg_error_train)
-    avg_error_test = avg_error_test / config.n_rand_loops
+    avg_error_test = sum_error_test / config.n_rand_loops
     avg_error_test_list.append(avg_error_test)
 
     # run full set of the last training data through model to plot it
+    (Xtestdf, Ttestdf, Timetest, scaleX, scaleT) = config.get_test_data(seed=rf, scaleX=scaleX, scaleT=scaleT, **read_kwargs)
     Xtest = torch.from_numpy(Xtestdf.astype(np.float32)).to(**config.to_kwargs)
     test_output = model(Xtest)
     # removing the scaling factor to plot in real units
@@ -297,6 +352,7 @@ for (config_i, config) in enumerate(configs):
     #!nvidia-smi
 
     # run full set of the last training data through model to plot it
+    (Xtraindf, Ttraindf, Timetrain, scaleX, scaleT) = config.get_train_data(seed=rf, **read_kwargs)
     Xtrain = torch.from_numpy(Xtraindf.astype(np.float32)).to(**config.to_kwargs)
     train_output = model(Xtrain)
 
@@ -414,3 +470,50 @@ plt.legend(fontsize=18)
 
 print(avg_error_train_list, avg_error_test_list)
 # ntest
+# pathlib.Path("model.pkl").write_bytes(pickle.dumps(model))
+# model = pickle.loads(pathlib.Path("model.pkl").read_bytes())
+# predict, score
+
+
+def get_data(config, seed):
+    read_kwargs = {"VRTG": True, "airborne_only": True}
+    Xtraindf, Ttraindf, _, scaleX, scaleT = config.get_train_data(seed=seed, **read_kwargs)
+    Xtestdf, Ttestdf, *_ = config.get_test_data(
+        seed=seed,
+        scaleX=scaleX,
+        scaleT=scaleT,
+        **read_kwargs,
+    )
+    # Xtrain = torch.from_numpy(X.astype(np.float32)).to(self.device)
+    # Ttrain = torch.from_numpy(T.astype(np.float32)).to(self.device)
+    return (Xtraindf, Ttraindf, Xtestdf, Ttestdf)
+
+
+def score(model, config, seed):
+    (Xtrain, Ttrain, Xtest, Ttest) = (
+        torch.from_numpy(el.astype(np.float32)).to(config.device)
+        for el in get_data(config, seed)
+    )
+    # FIXME: make `get_loss` part of config
+    train_loss = torch.nn.MSELoss()(model(Xtrain), Ttrain)
+    test_loss = torch.nn.MSELoss()(model(Xtest), Ttest)
+    return (train_loss, test_loss)
+
+
+
+# need cached read of model into memory
+# we also need the scaleX, scaleT for the model
+@functools.cache
+def cached_read_model(model_path):
+    import pickle
+    (model, scaleX, scaleT) = pickle.loads(model_path.read_bytes())
+    return (model, scaleX, scaleT)
+
+
+def predict_lstm(model_path, row):
+    (model, scaleX, _) = cached_read_model(model_path)
+    scaled = scaleX(row)
+    return model(scaled)
+
+
+# register udf with letsql
