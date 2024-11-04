@@ -29,147 +29,60 @@ def strip_n_fill(df, outliers=False, add_elev=False, VRTG=True, airborne_only=Fa
 
     # if you would like to keep the VRTG, LATG, and LONG then filter them with Isolation Forest method
     # ensure outliers=True
+
+    # list of what I think are the dependent variables to create a model for T.
+    # Removed the LONG, LATG, VRTG acceleration measurements that had period noise in it
+    Xlist = [
+        "time",
+        "RALT",
+        "PSA",
+        "PI",
+        "PT",
+        "ALTR",
+        "IVV",
+        "VSPS",
+        "FPAC",
+        "BLAC",
+        "CTAC",
+        "TAS",
+        "CAS",
+        "GS",
+        "CASS",
+        "WS",
+        "PTCH",
+        "ROLL",
+        "DA",
+        "TAT",
+        "SAT",
+        "LATP",
+        "LONP",
+    ]
+    if outliers or VRTG:
+        Xlist += ["LATG", "LONG", "VRTG"]
+    Tdf = df[Tlist].ffill().bfill()
+    Xdf = df[Xlist].ffill().bfill()
     if outliers:
-        # list of what I think are the dependent variables to create a model for T.
-        Xlist = [
-            "time",
-            "RALT",
-            "PSA",
-            "PI",
-            "PT",
-            "ALTR",
-            "IVV",
-            "VSPS",
-            "VRTG",
-            "LATG",
-            "LONG",
-            "FPAC",
-            "BLAC",
-            "CTAC",
-            "TAS",
-            "CAS",
-            "GS",
-            "CASS",
-            "WS",
-            "PTCH",
-            "ROLL",
-            "DA",
-            "TAT",
-            "SAT",
-            "LATP",
-            "LONP",
-        ]
-
-        Tdf = df[Tlist].ffill().bfill()
-        Xdf = df[Xlist].ffill().bfill()
-
-        # using the Isolation Forest model to remove outliers in some of the data
-        # contamination values that have been manually chosen
-        vrtg_cont = float(0.03)
-        latg_cont = float(0.015)
-        long_cont = float(0.015)
-
-        # Isolation Forest model
-        model = IsolationForest(
-            n_estimators=100, max_samples=256, contamination=vrtg_cont, max_features=1.0
-        )
-        outliers = model.fit_predict(Xdf[["VRTG"]].values)
-        # filtering out the outliers
-        Xdf["VRTG"][outliers < 0] = np.NaN
-
-        # Isolation Forest model
-        model = IsolationForest(
-            n_estimators=100, max_samples=256, contamination=latg_cont, max_features=1.0
-        )
-        outliers = model.fit_predict(Xdf[["LATG"]].values)
-        # filtering out the outliers
-        Xdf["LATG"][outliers < 0] = np.NaN
-
-        # Isolation Forest model
-        model = IsolationForest(
-            n_estimators=100, max_samples=256, contamination=long_cont, max_features=1.0
-        )
-        outliers = model.fit_predict(Xdf[["LONG"]].values)
-        # filtering out the outliers
-        Xdf["LONG"][outliers < 0] = np.NaN
-
+        for name, cont in (
+            ("VRTG", float(0.03)),
+            ("LATG", float(0.015)),
+            ("LONG", float(0.015)),
+        ):
+            # using the Isolation Forest model to remove outliers in some of the data
+            # contamination values that have been manually chosen
+            # Isolation Forest model
+            model = IsolationForest(
+                n_estimators=100, max_samples=256, contamination=cont, max_features=1.0
+            )
+            outliers = model.fit_predict(Xdf[[name]].values)
+            # filtering out the outliers
+            Xdf[name][outliers < 0] = np.NaN
         # pad all NaNs created by the outlier filter and backfill all NaN's at the beginning of the datafile
-        Xdf = Xdf.interpolate(method=method).bfill(axis=0)
-    else:
-        if VRTG:
-            # list of what I think are the dependent variables to create a model for T.
-            Xlist = [
-                "time",
-                "RALT",
-                "PSA",
-                "PI",
-                "PT",
-                "ALTR",
-                "IVV",
-                "VSPS",
-                "VRTG",
-                "LATG",
-                "LONG",
-                "FPAC",
-                "BLAC",
-                "CTAC",
-                "TAS",
-                "CAS",
-                "GS",
-                "CASS",
-                "WS",
-                "PTCH",
-                "ROLL",
-                "DA",
-                "TAT",
-                "SAT",
-                "LATP",
-                "LONP",
-            ]
-        else:
-            # list of what I think are the dependent variables to create a model for T.
-            # Removed the LONG, LATG, VRTG acceleration measurements that had period noise in it
-            Xlist = [
-                "time",
-                "RALT",
-                "PSA",
-                "PI",
-                "PT",
-                "ALTR",
-                "IVV",
-                "VSPS",
-                "FPAC",
-                "BLAC",
-                "CTAC",
-                "TAS",
-                "CAS",
-                "GS",
-                "CASS",
-                "WS",
-                "PTCH",
-                "ROLL",
-                "DA",
-                "TAT",
-                "SAT",
-                "LATP",
-                "LONP",
-            ]
+        Xdf = Xdf.ffill().bfill()
 
-        # first limit the dataframe to only the columns listed above
-        # after interpolation backfill all NaN's at the beginning of the datafile. The NaNs at the end are handled
-        # with the interpolation technique
-        Tdf = df[Tlist].ffill().bfill()
-        Xdf = df[Xlist].ffill().bfill()
-
-    # reset the index and remove the extra column it creates.
-    Xdf.reset_index(inplace=True)
-    Xdf.pop("index")
-    Tdf.reset_index(inplace=True)
-    Tdf.pop("index")
-
+    Xdf = Xdf.reset_index(drop=True)
+    Tdf = Tdf.reset_index(drop=True)
     if add_elev:
         Xdf, Tdf = add_elevation(Xdf, Tdf)
-
     return Xdf, Tdf
 
 
