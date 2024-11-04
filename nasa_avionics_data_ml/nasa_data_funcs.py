@@ -129,12 +129,7 @@ def strip_ground_data(df, debug=False):
         i += 1
 
     # drop all the rows at once which is faster than dropping them in the while loop.
-    df = df.iloc[df.index.drop(drop_list)]
-
-    # if there were rows/index's that were removed, then reset the index and remove the extra column it creates.
-    df.reset_index(inplace=True)
-    df.pop("index")
-
+    df = df.iloc[df.index.drop(drop_list)].reset_index(drop=True)
     return df
 
 
@@ -321,45 +316,17 @@ def read_parquet_flight_merge(
         Xs += (Xdfnew,)
         Ts += (Tdfnew,)
 
-    Xdf = pd.concat(Xs)
-    Tdf = pd.concat(Ts)
-    # reset the index and remove the extra column it creates.
-    Xdf.reset_index(inplace=True)
-    Xdf.pop("index")
-    Tdf.reset_index(inplace=True)
-    Tdf.pop("index")
-    # print('scaling')
+    Xdf = pd.concat(Xs).reset_index(drop=True)
+    Tdf = pd.concat(Ts).reset_index(drop=True)
 
-    if not scaleX:
-        # scale all training data once it was combined
-        Xs, Ts, scaleX, scaleT, time = scale_data(Xdf, Tdf)
-    else:
-        # scale all training data once it was combined
-        Xs, Ts, scaleX, scaleT, time = scale_data(
-            Xdf, Tdf, scaleX=scaleX, scaleT=scaleT
-        )
+    # print('scaling')
+    Xs, Ts, scaleX, scaleT, time = scale_data(
+        Xdf, Tdf, scaleX=scaleX, scaleT=scaleT
+    )
 
     # print('windowing')
     # create the sliding window matrices
     Xwin, Twin, Timetrain = sliding_window(Xs, Ts, time, seq_length)
-
-    # print('Done with Data Loading!')
-    # reclaim memory from numpy arrays
-    # del Xs, Ts, time
-
-    # I may not even need to delete these dataframes since I've moved these funcs
-    # to a stand-alone python file.  I believe variables are released after it's called.
-    # reclaim memory from dataframes
-    del Xdf, Tdf, df, Xdfnew, Tdfnew
-    # garbage collect
-    gc.collect()
-    # reset anything left to null
-    Xdf = pd.DataFrame()
-    Tdf = pd.DataFrame()
-    df = pd.DataFrame()
-    Xdfnew = pd.DataFrame()
-    Tdfnew = pd.DataFrame()
-
     return Xwin, Twin, Timetrain, scaleX, scaleT
 
 
