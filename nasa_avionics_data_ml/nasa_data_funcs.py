@@ -20,24 +20,6 @@ def strip_n_fill(df, outliers=False, add_elev=False, VRTG=True, airborne_only=Fa
     # output value to model with NN
     Tlist = ["ALT"]
 
-    # later I'll do this with all the variables and see if it mattered.
-    # another exploration should include the use of encoder/decoder NN to find the dependent variables.
-
-    # curious if stripping out all the data while the plane is on the ground would help.
-    # this would be a good place to do it
-
-    # removing the NaNs in the data.
-    # Using linear interpolation to ensure there are no NaNs in my matrices used for the NN
-    # thinking about stripping them out at the ETL stage for more efficiency.
-
-    # linear interpolation is good for now, since most of these data rates have 0.5 secs between values.
-    # it may be a good idea to use quadratic for the lower data rates and linear for the higher data rates.
-    # this is another area to explore later.
-    ##### Need to check the validity of linear interpolation when running in real-time that won't have access
-    #####  to the next value in order to interpolate.  should look at a plain 'pad' fill method instead.
-    # method = 'linear'
-    method = "pad"
-
     # remove data when it's on the ground before padding any other data.
     # this is done since the NSQT switch has a periodic 0 signal when airborne and I don't want to pad
     # this noise everywhere at 16hz then strip it.  This should also happen before the elevation data is
@@ -203,39 +185,6 @@ def strip_ground_data(df, debug=False):
     n_samples = df.shape[0]
     if debug:
         print(f"n_samples = {n_samples}")
-
-    ##loop through the df
-    # i=0
-    # while i < (n_samples-8):
-    #    if debug: print(i)
-    #    nsqt = df['NSQT'][i]
-    #    groundspeed = df['GS'][i]
-    #    airborne = nsqt + groundspeed
-    #
-    #    nsqt_p1 = df['NSQT'][i+4]
-    #    groundspeed_p1 = df['GS'][i+4]
-    #    airborne_p1 = nsqt_p1 + groundspeed_p1
-    #
-    #    nsqt_p2 = df['NSQT'][i+8]
-    #    groundspeed_p2 = df['GS'][i+8]
-    #    airborne_p2 = nsqt_p2 + groundspeed_p2
-    #    #strip if there are 3 consequtive values not airborne
-    #    #the airborne data is at 4Hz but samples are at 16Hz
-    #    if (not nsqt    or not groundspeed) and \
-    #       (not nsqt_p1 or not groundspeed_p1) and \
-    #       (not nsqt_p2 or not groundspeed_p2):
-    #        #we must remove the full row of data and next 4 rows to account for 16Hz data
-    #        # at the i index in the df dataframe
-    #        if debug: print(f'deleting rows {i, i+1, i+2, i+3}')
-    #        df.drop([i,i+1,i+2,i+3],inplace=True)
-    #        i+=4
-    #    else:
-    #        i+=1
-    ##always remove the last 8 datapoints (at 16Hz) to catch the last 2 points (at 4 Hz) on the ground
-    ##d = np.linspace(n_samples-9,n_samples-1,num=8).astype(int)
-    ##df.drop(d,inplace=True)
-    # df.drop([n_samples-1,n_samples-2,n_samples-3,n_samples-4],inplace=True)
-    # df.drop([n_samples-5,n_samples-6,n_samples-7,n_samples-8],inplace=True)
 
     # just delete if ground speed is 0.
     drop_list = []
@@ -423,90 +372,6 @@ def sliding_window(X, T, TIME, seq_length):
     return np.array(x), np.array(t), np.array(time)
 
 
-def read_parquet_batch(
-    cwd,
-    fdir,
-    file_list,
-    seq_length,
-    scaleX=None,
-    scaleT=None,
-    debug=False,
-    outliers=False,
-    add_elev=False,
-    VRTG=False,
-):
-    """read files from the file_list and return an array of panda dataframes so it can be
-    read into the get batch function and each df in the array can get extracted and
-    converted to a tensor that is pushed to the device during loops of the epochs
-    set outliers=True to run the
-    """
-    # initialize these dataframes
-    Xdf = pd.DataFrame()
-    Tdf = pd.DataFrame()
-
-    # initialize the dataframe arrays
-    XA = []
-    TA = []
-    TimeA = []
-
-    # read in the files and create an array of panda dataframes.
-    for file in file_list:
-        # print(f'file:{file}')
-        pname = os.path.join(cwd, fdir, file)
-        df = pd.read_parquet(path=pname)
-
-        if debug:
-            print("strip-n-fill")
-
-        # striping out all un-needed columns and filling blank spaces with interpolated data
-        Xdf, Tdf = strip_n_fill(df, outliers=outliers, add_elev=add_elev, VRTG=VRTG)
-
-        # adding the elevation data to the dataframe
-
-        if debug:
-            print("Scaling")
-
-        # if this is training data, then this will scale all flight data by the first flight file
-        # it's not perfect if the first flight file sucks, but it should be close if it's a decent file.
-        # if it's testing data it will be scaled by the training data scale
-        if not scaleX:
-            # scale all training data once it was combined
-            Xs, Ts, scaleX, scaleT, time = scale_data(Xdf, Tdf, debug=debug)
-        else:
-            # scale all training data once it was combined
-            Xs, Ts, scaleX, scaleT, time = scale_data(
-                Xdf, Tdf, scaleX=scaleX, scaleT=scaleT, debug=debug
-            )
-
-        if debug:
-            print("windowing")
-        # create the sliding window matrices
-        # Timetrain is only used for plotting purposes
-        Xwin, Twin, Timetrain = sliding_window(Xs, Ts, time, seq_length)
-
-        # combine all processed dataframes into an array
-        XA.append(Xwin)
-        TA.append(Twin)
-        TimeA.append(Timetrain)
-
-    # print('Done with Data Loading!')
-    # reclaim memory from numpy arrays
-    # del Xs, Ts, time
-
-    # reclaim memory from dataframes
-    del Xdf, Tdf, df, Xwin, Twin
-    # garbage collect
-    gc.collect()
-    # reset anything left to null to ensure no data is left
-    Xdf = pd.DataFrame()
-    Tdf = pd.DataFrame()
-    df = pd.DataFrame()
-    Xwin = pd.DataFrame()
-    Twin = pd.DataFrame()
-
-    return XA, TA, TimeA, scaleX, scaleT
-
-
 def read_parquet_flight_merge(
     paths,
     seq_length,
@@ -583,105 +448,6 @@ def read_parquet_flight_merge(
     Tdfnew = pd.DataFrame()
 
     return Xwin, Twin, Timetrain, scaleX, scaleT
-
-
-def read_parquet_rand(n_files, seq_length, device, scaleX=None, scaleT=None):
-    # read random n_files and return the handle to the tensor that has been pushed to the
-    # device
-    cwd = os.getcwd()
-    fdir = "Tail_687_1_parquet"
-    # example parquet fdir for plotting
-
-    os.chdir(os.path.join(cwd, fdir))
-    # fulllist = glob.glob(f'*.parquet')
-    os.chdir(cwd)
-
-    # modifying this so I can have better one-to-one comparison of methods.
-    fulllist = [
-        "687200107192334.parquet",
-        "687200107301239.parquet",
-        "687200104261527.parquet",
-        "687200107251002.parquet",
-        "687200104301119.parquet",
-        "687200107101600.parquet",
-        "687200104170717.parquet",
-        "687200107181544.parquet",
-        "687200104202027.parquet",
-        "687200107170234.parquet",
-        "687200107251652.parquet",
-        "687200107122323.parquet",
-        "687200104162039.parquet",
-        "687200107311025.parquet",
-        "687200104181334.parquet",
-        "687200107171131.parquet",
-        "687200104181127.parquet",
-        "687200107241524.parquet",
-        "687200107060930.parquet",
-        "687200107150546.parquet",
-    ]
-
-    total_nfiles = len(fulllist)
-
-    # randomize the starting and run through all files eventually
-    ifiles = np.random.randint(0, total_nfiles, n_files)
-    filelist = [fulllist[i] for i in ifiles]
-
-    # creating the training set
-    # initialize these dataframes
-    Xdf = pd.DataFrame()
-    Tdf = pd.DataFrame()
-    # print('Reading Training Files:')
-    for file in filelist:
-        # print(f'file:{file}')
-        pname = os.path.join(cwd, fdir, file)
-        df = pd.read_parquet(path=pname)
-
-        Xdfnew, Tdfnew = strip_n_fill(df)
-
-        # combine all training dataframes
-        Xdf = Xdf.append(Xdfnew)
-        Tdf = Tdf.append(Tdfnew)
-
-    # reset the index and remove the extra column it creates.
-    Xdf.reset_index(inplace=True)
-    Xdf.pop("index")
-    Tdf.reset_index(inplace=True)
-    Tdf.pop("index")
-    # print('scaling')
-
-    if not scaleX:
-        # scale all training data once it was combined
-        Xs, Ts, scaleX, scaleT, time = scale_data(Xdf, Tdf)
-    else:
-        # scale all training data once it was combined
-        Xs, Ts, scaleX, scaleT, time = scale_data(
-            Xdf, Tdf, scaleX=scaleX, scaleT=scaleT
-        )
-
-    # print('windowing')
-    # create the sliding window matrices
-    Xwin, Twin, Timetrain = sliding_window(Xs, Ts, time, seq_length)
-    # print('tensors')
-    # training dataset
-    Xtrain = torch.from_numpy(Xwin.astype(np.float32)).to(device)
-    Ttrain = torch.from_numpy(Twin.astype(np.float32)).to(device)
-
-    # print('Done with Data Loading!')
-    # reclaim memory from numpy arrays
-    # del Xs, Ts, time
-
-    # reclaim memory from dataframes
-    del Xdf, Tdf, df, Xdfnew, Tdfnew
-    # garbage collect
-    gc.collect()
-    # reset anything left to null
-    Xdf = pd.DataFrame()
-    Tdf = pd.DataFrame()
-    df = pd.DataFrame()
-    Xdfnew = pd.DataFrame()
-    Tdfnew = pd.DataFrame()
-
-    return Xtrain, Ttrain, Timetrain, scaleX, scaleT
 
 
 def get_batch(X, T, batch_size=100):
