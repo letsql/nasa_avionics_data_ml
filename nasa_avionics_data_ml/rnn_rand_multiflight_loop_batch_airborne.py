@@ -68,7 +68,7 @@ class Config:
         if not self.pdir.exists():
             raise ValueError
         x_names = base_x_names
-        if self.airborne_only or self.vrtb:
+        if self.airborne_only or self.vrtg:
             x_names += ("LATG", "LONG", "VRTG")
         object.__setattr__(self, "x_names", x_names)
 
@@ -127,16 +127,16 @@ class Config:
         train_paths = paths[:n_train]
         return train_paths
 
-    def get_train_data(self, seed, **kwargs):
+    def get_train_data(self, seed, **read_kwargs):
         train_paths = self.get_train_paths(seed=seed)
-        Xtraindf, Ttraindf, Timetrain, scaleX, scaleT = ndf.read_parquet_flight_merge(
+        X, T, scaleX, scaleT, time = ndf.read_filtered_scaled(
             train_paths,
-            self.seq_length,
             self.xlist,
             self.tlist,
-            **kwargs
+            airborne_only=self.airborne_only,
+            **read_kwargs,
         )
-        return Xtraindf, Ttraindf, Timetrain, scaleX, scaleT
+        return X, T, scaleX, scaleT, time
 
     def get_test_paths(self, seed):
         # shuffle the files around in this list to get different results for the bootstrapping
@@ -145,16 +145,18 @@ class Config:
         test_paths = paths[n_train:]
         return test_paths
 
-    def get_test_data(self, seed, **kwargs):
+    def get_test_data(self, seed, scaleX, scaleT, **read_kwargs):
         test_paths = self.get_test_paths(seed=seed)
-        Xtestdf, Ttestdf, Timetest, scaleX, scaleT = ndf.read_parquet_flight_merge(
+        X, T, _, _, time = ndf.read_filtered_scaled(
             test_paths,
-            self.seq_length,
             self.xlist,
             self.tlist,
-            **kwargs
+            scaleX=scaleX,
+            scaleT=scaleT,
+            airborne_only=self.airborne_only,
+            **read_kwargs
         )
-        return Xtestdf, Ttestdf, Timetest, scaleX, scaleT
+        return X, T, time
 
     def get_model(self):
         model = LSTM(
@@ -168,23 +170,18 @@ class Config:
         return model
 
     def train_model(self, seed, scaleX=None, scaleT=None, **read_kwargs):
-        Xtraindf, Ttraindf, _, scaleX, scaleT = self.get_train_data(
-            seed=seed,
-            scaleX=scaleX,
-            scaleT=scaleT,
-            **read_kwargs,
-        )
+        X, T, scaleX, scaleT, _ = self.get_train_data(seed=seed, **read_kwargs)
         model = self.get_model()
         loss_func = torch.nn.MSELoss()
         opt = torch.optim.Adam(model.parameters(), lr=self.l_rate)
         error_trace = []
         for _ in range(self.epoch):
-            for _, (X, T) in enumerate(
-                ndf.get_batch(Xtraindf, Ttraindf, batch_size=self.batch_size)
+            for _, (x, t) in enumerate(
+                ndf.gen_batches(X, T, self.seq_length, batch_size=self.batch_size)
             ):
                 # create tensors from the data frames
-                Xtrain = torch.from_numpy(X.astype(np.float32)).to(self.device)
-                Ttrain = torch.from_numpy(T.astype(np.float32)).to(self.device)
+                Xtrain = torch.from_numpy(x.astype(np.float32)).to(self.device)
+                Ttrain = torch.from_numpy(t.astype(np.float32)).to(self.device)
 
                 ##run input forward through model
                 train_output = model(Xtrain)
@@ -219,16 +216,12 @@ class Config:
         )
 
     def test_model(self, seed, scaleX, scaleT, model, loss_func, **read_kwargs):
-        Xtestdf, Ttestdf, _, scaleX, scaleT = self.get_test_data(
-            seed=seed,
-            scaleX=scaleX,
-            scaleT=scaleT,
-            **read_kwargs,
-        )
+        X, T, _ = self.get_test_data(seed=seed, scaleX=scaleX, scaleT=scaleT, **read_kwargs)
+        x, t, _ = map(np.array, zip(*ndf.gen_sliding_windows(X, T, None, self.seq_length)))
 
         # create tensors from the data frames
-        Xtest = torch.from_numpy(Xtestdf.astype(np.float32)).to(self.device)
-        Ttest = torch.from_numpy(Ttestdf.astype(np.float32)).to(self.device)
+        Xtest = torch.from_numpy(x.astype(np.float32)).to(self.device)
+        Ttest = torch.from_numpy(t.astype(np.float32)).to(self.device)
 
         # Run the test data through the trained model
         test_output = model(Xtest)
@@ -299,6 +292,10 @@ print(
 )
 
 
+Xtrain, Ttrain, scaleX, scaleT, timetrain = config.get_train_data(seed=0)
+Xtest, Ttest, timetest = config.get_test_data(seed=0, scaleX=scaleX, scaleT=scaleT)
+
+
 avg_error_train_list = []
 avg_error_test_list = []
 # loop through all the different configurations
@@ -316,15 +313,14 @@ for (config_i, config) in enumerate(configs):
     # bootstrap loop
     for rf in range(config.n_rand_loops):
         # print('Loading Data...')
-        read_kwargs = {"VRTG": True, "airborne_only": True}
-        (model, scaleX, scaleT, loss_func, opt, error_trace, error_train) = config.train_model(seed=rf, **read_kwargs)
+        (model, scaleX, scaleT, loss_func, opt, error_trace, error_train) = config.train_model(seed=rf)
         sum_error_train += error_train
 
         # testing the model
         # --------------------------
         # print('Testing the Model...')
         error_test = config.test_model(
-            seed=rf, scaleX=scaleX, scaleT=scaleT, model=model, loss_func=loss_func, **read_kwargs,
+            seed=rf, scaleX=scaleX, scaleT=scaleT, model=model, loss_func=loss_func,
         )
         sum_error_test += error_test
         # print('after test delete')
@@ -337,31 +333,35 @@ for (config_i, config) in enumerate(configs):
     avg_error_test_list.append(avg_error_test)
 
     # run full set of the last training data through model to plot it
-    (Xtestdf, Ttestdf, Timetest, scaleX, scaleT) = config.get_test_data(seed=rf, scaleX=scaleX, scaleT=scaleT, **read_kwargs)
-    Xtest = torch.from_numpy(Xtestdf.astype(np.float32)).to(**config.to_kwargs)
+    # FIXME: change
+    X, T, Timetest = config.get_test_data(seed=rf, scaleX=scaleX, scaleT=scaleT)
+    Xs, Ts = next(ndf.gen_batches(X, T, config.seq_length, None))
+    Xtest = torch.from_numpy(Xs.astype(np.float32)).to(**config.to_kwargs)
     test_output = model(Xtest)
     # removing the scaling factor to plot in real units
-    Ttest_alt = scaleT.inverse_transform(Ttestdf)
+    Ttest_alt = scaleT.inverse_transform(Ts)
     Ytest_alt = scaleT.inverse_transform(test_output.detach().cpu().numpy())
 
     # free up some GPU memory by deleting the tensors on the GPU
-    del test_output, Ttestdf, Xtest, Xtestdf
+    del Xtest, test_output
     torch.cuda.empty_cache()
 
     # print('after test_alt delete')
     #!nvidia-smi
 
     # run full set of the last training data through model to plot it
-    (Xtraindf, Ttraindf, Timetrain, scaleX, scaleT) = config.get_train_data(seed=rf, **read_kwargs)
-    Xtrain = torch.from_numpy(Xtraindf.astype(np.float32)).to(**config.to_kwargs)
+    # FIXME: change
+    (X, T, scaleX, scaleT, Timetrain) = config.get_train_data(seed=rf)
+    Xs, Ts = next(ndf.gen_batches(X, T, config.seq_length, None))
+    Xtrain = torch.from_numpy(Xs.astype(np.float32)).to(**config.to_kwargs)
     train_output = model(Xtrain)
 
     # removing the scaling factor to plot training and testing data in real units
-    Ttrain_alt = scaleT.inverse_transform(Ttraindf)
+    Ttrain_alt = scaleT.inverse_transform(Ts)
     Ytrain_alt = scaleT.inverse_transform(train_output.detach().cpu().numpy())
 
     # free up some GPU memory by deleting the tensors on the GPU
-    del Xtrain, train_output, Xtraindf, Ttraindf
+    del Xtrain, train_output
     torch.cuda.empty_cache()
 
     # print('after train_alt delete')
@@ -398,8 +398,8 @@ for (config_i, config) in enumerate(configs):
     ax1 = plt.subplot(nv, 1, 1)
     ax1.set_title("Training Data", fontsize=20)
     # plt.plot(Ttrain.detach().numpy()[42000:43000],      'ro', label='Target Altitude')
-    plt.plot(Timetrain, Ttrain_alt, "ro", label="Target Altitude")
-    plt.plot(Timetrain, Ytrain_alt, "b.", label="Model Altitude")
+    plt.plot(Timetrain[config.seq_length:], Ttrain_alt, "ro", label="Target Altitude")
+    plt.plot(Timetrain[config.seq_length:], Ytrain_alt, "b.", label="Model Altitude")
     plt.legend(fontsize=14)
     plt.ylabel("Altitude (ft) ", fontsize=14)
 
@@ -432,8 +432,8 @@ for (config_i, config) in enumerate(configs):
     # subplot 1
     ax1 = plt.subplot(nv, 1, 1)
     ax1.set_title("Testing Data", fontsize=20)
-    plt.plot(Timetest, Ttest_alt, "ro", label="Target Altitude")
-    plt.plot(Timetest, Ytest_alt, "b.", label="Model Altitude")
+    plt.plot(Timetest[config.seq_length:], Ttest_alt, "ro", label="Target Altitude")
+    plt.plot(Timetest[config.seq_length:], Ytest_alt, "b.", label="Model Altitude")
     plt.legend(fontsize=14)
     plt.ylabel("Altitude (ft) ", fontsize=14)
 
@@ -476,13 +476,11 @@ print(avg_error_train_list, avg_error_test_list)
 
 
 def get_data(config, seed):
-    read_kwargs = {"VRTG": True, "airborne_only": True}
-    Xtraindf, Ttraindf, _, scaleX, scaleT = config.get_train_data(seed=seed, **read_kwargs)
+    Xtraindf, Ttraindf, _, scaleX, scaleT = config.get_train_data(seed=seed)
     Xtestdf, Ttestdf, *_ = config.get_test_data(
         seed=seed,
         scaleX=scaleX,
         scaleT=scaleT,
-        **read_kwargs,
     )
     # Xtrain = torch.from_numpy(X.astype(np.float32)).to(self.device)
     # Ttrain = torch.from_numpy(T.astype(np.float32)).to(self.device)
