@@ -186,6 +186,7 @@ def partition(n, seq):
 
 
 def gen_sliding_windows(X, T, time, seq_length):
+    # FIXME: partition by flight: its all the features and they're all floats
     for i in range(len(X)-seq_length):
         yield get_sliding_window(X, T, time, seq_length, i)
 
