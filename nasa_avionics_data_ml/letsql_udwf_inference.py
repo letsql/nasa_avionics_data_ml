@@ -4,7 +4,6 @@ import pickle
 import pprint
 import warnings
 
-import dask
 import ibis
 import numpy as np
 import pyarrow as pa
@@ -142,7 +141,7 @@ def do_manual_batch(expr, model, seq_length, scaleX, scaleT, return_type, xlist,
     return predicted
 
 
-def read_model_and_scales(config, seed, model_path=S.model_path):
+def read_model_and_scales(model_path=S.model_path, scales_path=S.scales_path):
 
     def read_model(model_path, device=torch.device("cpu")):
         model_path = pathlib.Path(model_path)
@@ -157,12 +156,9 @@ def read_model_and_scales(config, seed, model_path=S.model_path):
                 raise ValueError
         return model
 
-    def read_scales(config, seed):
-        (_, _, scaleX, scaleT, _) = config.get_train_data(seed=seed)
-        return (scaleX, scaleT)
 
     model = read_model(model_path)
-    (scaleX, scaleT) = read_scales(config, seed)
+    (scaleX, scaleT) = pickle.loads(scales_path.read_bytes())
     return (model, scaleX, scaleT)
 
 
@@ -177,7 +173,7 @@ if __name__ == "__main__":
 
     return_type = "float64"
     (config, *_) = Config.get_debug_configs()
-    (model, scaleX, scaleT) = read_model_and_scales(config, 0)
+    (model, scaleX, scaleT) = read_model_and_scales()
     # (seq_length, xlist) = (config.seq_length, config.xlist)
     evaluate_all = make_evaluate_all(
         ibis.schema({name: float for name in config.x_names}),
