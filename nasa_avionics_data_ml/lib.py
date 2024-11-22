@@ -1,8 +1,10 @@
 import copy
 import functools
 import pathlib
+import pickle
 
 import numpy as np
+import pyarrow as pa
 import torch
 from attrs import (
     field,
@@ -14,6 +16,7 @@ from attrs.validators import (
 )
 
 import nasa_avionics_data_ml.nasa_data_funcs as ndf
+import nasa_avionics_data_ml.settings as S
 from nasa_avionics_data_ml.LSTM import LSTM
 
 
@@ -268,3 +271,52 @@ def shuffle(x, seed=0):
     x = copy.copy(x)
     rng.shuffle(x)
     return x
+
+
+def pandas_to_sequence_tensor(df, seq_length, scaler, astype=np.float32):
+
+    def gen_sliding_windows(sliceable, seq_length):
+        for i in range(len(sliceable) - seq_length + 1):
+            yield sliceable[i:i+seq_length]
+
+    transformed = scaler.transform(df)
+    if seq_length is None:
+        tensor = torch.from_numpy(
+            transformed.astype(astype),
+        )
+    else:
+        tensor = torch.from_numpy(
+            np.array(tuple(gen_sliding_windows(transformed, seq_length)))
+            .astype(astype)
+        )
+    return tensor
+
+
+def pyarrow_to_sequence_tensor(arrow_values, seq_length, scaler, astype=np.float32):
+
+    table = pa.Table.from_arrays(
+        arrow_values,
+        names=scaler.feature_names_in_,
+    )
+    return pandas_to_sequence_tensor(table.to_pandas(), seq_length, scaler, astype)
+
+
+def read_model_and_scales(model_path=S.model_path, scales_path=S.scales_path):
+
+    def read_model(model_path, device=torch.device("cpu")):
+        model_path = pathlib.Path(model_path)
+        match model_path.suffix:
+            case ".pkl":
+                model = pickle.loads(model_path.read_bytes()).to(device)
+                model.device = device
+            case ".torch":
+                model = torch.load(model_path)
+                model.device = device
+            case _:
+                raise ValueError
+        return model
+
+
+    model = read_model(model_path)
+    (scaleX, scaleT) = pickle.loads(scales_path.read_bytes())
+    return (model, scaleX, scaleT)

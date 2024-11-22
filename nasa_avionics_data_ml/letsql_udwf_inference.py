@@ -1,41 +1,22 @@
 import operator
-import pathlib
-import pickle
 import pprint
 import warnings
 
 import ibis
-import numpy as np
 import pyarrow as pa
-import torch
 
 import letsql as ls
-import nasa_avionics_data_ml.zip_data as ZD
+from nasa_avionics_data_ml.lib import (
+    pyarrow_to_sequence_tensor,
+)
 import nasa_avionics_data_ml.settings as S
+import nasa_avionics_data_ml.zip_data as ZD
 from letsql.common.caching import ParquetSnapshot
 from letsql.common.utils.defer_utils import deferred_read_parquet
 from letsql.expr.relations import into_backend
-from letsql.expr.udf import pyarrow_udwf
-
-
-# def deferred_read_parquet(con, path, table_name=None, **kwargs):
-#     # HAK: work around object_store registration issue: only occurs with csv, not parquet
-#     from letsql.common.utils.defer_utils import gen_name, make_read_kwargs, Read
-#     deferred_read_parquet.method_name = method_name = "read_parquet"
-#     method = getattr(con, method_name)
-#     if table_name is None:
-#         table_name = gen_name(f"letsql-{method_name}")
-#     schema_con = ls.connect()
-#     schema_con.read_csv(path)
-#     schema = schema_con.read_parquet(path).schema()
-#     read_kwargs = make_read_kwargs(method, path, table_name, **kwargs)
-#     return Read(
-#         method_name=method_name,
-#         name=table_name,
-#         schema=schema,
-#         source=con,
-#         read_kwargs=read_kwargs,
-#     ).to_expr()
+from letsql.expr.udf import (
+    pyarrow_udwf,
+)
 
 
 def make_rate_to_parquet(flight_data):
@@ -48,7 +29,7 @@ def make_rate_to_parquet(flight_data):
     }
 
 
-def asof_join_flight_data(flight_data):
+def asof_join_flight_data(flight_data, airborne_only=True):
     """Create an expression for a particular flight's data """
 
     rate_to_parquet = make_rate_to_parquet(flight_data)
@@ -65,8 +46,8 @@ def asof_join_flight_data(flight_data):
     (expr, *others) = (into_backend(t, db_con, name=f"flight-{flight_data.flight}-{t.op().parent.name}") for t in ts)
     for other in others:
         expr = expr.asof_join(other, on="time").drop(["time_right", "flight_right"])
-    # remove ground data
-    expr = expr[lambda t: t.GS != 0]
+    if airborne_only:
+        expr = expr[lambda t: t.GS != 0]
     return expr
 
 
@@ -77,13 +58,14 @@ def union_cached_asof_joined_flight_data(*flight_datas, cls=ParquetSnapshot):
     ))
 
 
-def make_evaluate_all(schema, return_type, model, seq_length, scaleX, scaleT):
+def make_inference_udwf(schema, return_type, model, seq_length, scaleX, scaleT):
     """Create a udwf for running inference of a particular model """
+
     @pyarrow_udwf(
         schema=schema,
         return_type=ibis.dtype(return_type),
     )
-    def evaluate_all(self, values, num_rows):
+    def inference_udwf(self, values, num_rows):
         return predict_flight(
             values,
             model,
@@ -92,28 +74,10 @@ def make_evaluate_all(schema, return_type, model, seq_length, scaleX, scaleT):
             scaleT,
             return_type,
         )
-    return evaluate_all
+    return inference_udwf
 
 
 def predict_flight(arrow_values, model, seq_length, scaleX, scaleT, return_type):
-
-    def pyarrow_to_sequence_tensor(arrow_values, seq_length, scaler):
-
-        def gen_sliding_windows(sliceable, seq_length):
-            for i in range(len(sliceable) - seq_length + 1):
-                yield sliceable[i:i+seq_length]
-
-        table = pa.Table.from_arrays(
-            arrow_values,
-            names=scaleX.feature_names_in_,
-        )
-        transformed = scaler.transform(table.to_pandas())
-        tensor = torch.from_numpy(
-            np.array(tuple(gen_sliding_windows(transformed, seq_length)))
-            # FIXME parametrize astype arg or add as `model` param
-            .astype(np.float32)
-        )
-        return tensor
 
     def torch_to_payrrow(tensor, scaler):
         predicted = scaler.inverse_transform(tensor.detach().numpy())[:, 0]
@@ -162,32 +126,14 @@ def do_manual_batch(expr, model, seq_length, scaleX, scaleT, return_type, xlist,
     return predicted
 
 
-def read_model_and_scales(model_path=S.model_path, scales_path=S.scales_path):
-
-    def read_model(model_path, device=torch.device("cpu")):
-        model_path = pathlib.Path(model_path)
-        match model_path.suffix:
-            case ".pkl":
-                model = pickle.loads(model_path.read_bytes()).to(device)
-                model.device = device
-            case ".torch":
-                model = torch.load(model_path)
-                model.device = device
-            case _:
-                raise ValueError
-        return model
-
-
-    model = read_model(model_path)
-    (scaleX, scaleT) = pickle.loads(scales_path.read_bytes())
-    return (model, scaleX, scaleT)
-
-
 if __name__ == "__main__":
     import itertools
     import pprint
 
-    from nasa_avionics_data_ml.lib import Config
+    from nasa_avionics_data_ml.lib import (
+        Config,
+        read_model_and_scales,
+    )
 
     (order_by, group_by) = ("time", "flight")
     tail = "Tail_652_1"
@@ -196,7 +142,7 @@ if __name__ == "__main__":
     (config, *_) = Config.get_debug_configs()
     (model, scaleX, scaleT) = read_model_and_scales()
     # (seq_length, xlist) = (config.seq_length, config.xlist)
-    evaluate_all = make_evaluate_all(
+    inference_udwf = make_inference_udwf(
         ibis.schema({name: float for name in config.x_names}),
         return_type, model, 8, scaleX, scaleT,
     )
@@ -216,7 +162,7 @@ if __name__ == "__main__":
     )
     with_prediction = (
         expr
-        .mutate(predicted=evaluate_all.on_expr(expr).over(window))
+        .mutate(predicted=inference_udwf.on_expr(expr).over(window))
     )
 
     pprint.pprint(make_rate_to_parquet(flight_data))
