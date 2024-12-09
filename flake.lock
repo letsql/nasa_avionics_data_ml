@@ -1,12 +1,111 @@
 {
   "nodes": {
+    "crane": {
+      "locked": {
+        "lastModified": 1733016477,
+        "narHash": "sha256-Hh0khbqBeCtiNS0SJgqdWrQDem9WlPEc2KF5pAY+st0=",
+        "owner": "ipetkov",
+        "repo": "crane",
+        "rev": "76d64e779e2fbaf172110038492343a8c4e29b55",
+        "type": "github"
+      },
+      "original": {
+        "owner": "ipetkov",
+        "repo": "crane",
+        "type": "github"
+      }
+    },
+    "flake-utils": {
+      "inputs": {
+        "systems": "systems"
+      },
+      "locked": {
+        "lastModified": 1731533236,
+        "narHash": "sha256-l0KFg5HjrsfsO/JpG+r7fRrqm12kzFHyUHqHCVpMMbI=",
+        "owner": "numtide",
+        "repo": "flake-utils",
+        "rev": "11707dc2f618dd54ca8739b309ec4fc024de578b",
+        "type": "github"
+      },
+      "original": {
+        "owner": "numtide",
+        "repo": "flake-utils",
+        "type": "github"
+      }
+    },
+    "flake-utils_2": {
+      "inputs": {
+        "systems": "systems_2"
+      },
+      "locked": {
+        "lastModified": 1710146030,
+        "narHash": "sha256-SZ5L6eA7HJ/nmkzGG7/ISclqe6oZdOZTNoesiInkXPQ=",
+        "owner": "numtide",
+        "repo": "flake-utils",
+        "rev": "b1d9ab70662946ef0850d488da1c9019f3a9752a",
+        "type": "github"
+      },
+      "original": {
+        "owner": "numtide",
+        "repo": "flake-utils",
+        "type": "github"
+      }
+    },
+    "letsql": {
+      "inputs": {
+        "crane": "crane",
+        "flake-utils": "flake-utils",
+        "nix-utils": "nix-utils",
+        "nixpkgs": "nixpkgs",
+        "pyproject-build-systems": "pyproject-build-systems",
+        "pyproject-nix": "pyproject-nix",
+        "rust-overlay": "rust-overlay",
+        "uv2nix": "uv2nix"
+      },
+      "locked": {
+        "lastModified": 1733661203,
+        "narHash": "sha256-8g6j1tYm4CbF/r34Rpq+PxC2E63mdkm+cO19HAGeBfk=",
+        "ref": "284bff2",
+        "rev": "284bff2da62327b8ba0b1d4819a096e4b55a2f59",
+        "revCount": 350,
+        "type": "git",
+        "url": "file:///home/dan/repos/github/letsql"
+      },
+      "original": {
+        "ref": "284bff2",
+        "type": "git",
+        "url": "file:///home/dan/repos/github/letsql"
+      }
+    },
+    "nix-utils": {
+      "inputs": {
+        "flake-utils": "flake-utils_2",
+        "nixpkgs": [
+          "letsql",
+          "nixpkgs"
+        ]
+      },
+      "locked": {
+        "lastModified": 1727618726,
+        "narHash": "sha256-ZKz9SXNOly0KLTN5fHCfCJbarRxdrv6sRMXavrKNK5U=",
+        "owner": "letsql",
+        "repo": "nix-utils",
+        "rev": "7ca9ed7da529edf8a4a094fbd25f6ffb8523e1a8",
+        "type": "github"
+      },
+      "original": {
+        "owner": "letsql",
+        "repo": "nix-utils",
+        "type": "github"
+      }
+    },
     "nixpkgs": {
       "locked": {
-        "lastModified": 1732837521,
-        "narHash": "sha256-jNRNr49UiuIwaarqijgdTR2qLPifxsVhlJrKzQ8XUIE=",
+        "lastModified": 1733212471,
+        "narHash": "sha256-M1+uCoV5igihRfcUKrr1riygbe73/dzNnzPsmaLCmpo=",
         "owner": "NixOS",
         "repo": "nixpkgs",
-        "rev": "970e93b9f82e2a0f3675757eb0bfc73297cc6370",
+        "rev": "55d15ad12a74eb7d4646254e13638ad0c4128776",
         "type": "github"
       },
       "original": {
@@ -16,24 +115,43 @@
         "type": "github"
       }
     },
+    "nixpkgs_2": {
+      "locked": {
+        "lastModified": 1728538411,
+        "narHash": "sha256-f0SBJz1eZ2yOuKUr5CA9BHULGXVSn6miBuUWdTyhUhU=",
+        "owner": "NixOS",
+        "repo": "nixpkgs",
+        "rev": "b69de56fac8c2b6f8fd27f2eca01dcda8e0a4221",
+        "type": "github"
+      },
+      "original": {
+        "owner": "NixOS",
+        "ref": "nixpkgs-unstable",
+        "repo": "nixpkgs",
+        "type": "github"
+      }
+    },
     "pyproject-build-systems": {
       "inputs": {
         "nixpkgs": [
+          "letsql",
           "nixpkgs"
         ],
         "pyproject-nix": [
+          "letsql",
           "pyproject-nix"
         ],
         "uv2nix": [
+          "letsql",
           "uv2nix"
         ]
       },
       "locked": {
-        "lastModified": 1732962768,
-        "narHash": "sha256-h2Yw5zyWPsGQVpiGLTpSahftvBsnZOaA7v4mk05m1lU=",
+        "lastModified": 1733103007,
+        "narHash": "sha256-7xEh7JboF6tTyzfIRbPcb7OtwZsIPBLUfg9mkv6Yum0=",
         "owner": "pyproject-nix",
         "repo": "build-system-pkgs",
-        "rev": "1e772680922e7bc536020ae096bc263d8d156e03",
+        "rev": "52f42c78204f705289339a27e0f2a2e38dc25899",
         "type": "github"
       },
       "original": {
@@ -45,15 +163,16 @@
     "pyproject-nix": {
       "inputs": {
         "nixpkgs": [
+          "letsql",
           "nixpkgs"
         ]
       },
       "locked": {
-        "lastModified": 1732962559,
-        "narHash": "sha256-eYqPesSaqCs1VOgCU1aHQlGhHf0vuBgGB7/Oilwh6sY=",
+        "lastModified": 1733112511,
+        "narHash": "sha256-qQd6K8RYZpwEeawyqSnDkFCPZAIbz8c7BP9490EsgQM=",
         "owner": "pyproject-nix",
         "repo": "pyproject.nix",
-        "rev": "3177f822c19c053e9bebdd60bac6f3440cd924d5",
+        "rev": "60b55f8095cc1909d1c8f1806431f0f7f5f3fc32",
         "type": "github"
       },
       "original": {
@@ -64,27 +183,90 @@
     },
     "root": {
       "inputs": {
-        "nixpkgs": "nixpkgs",
-        "pyproject-build-systems": "pyproject-build-systems",
-        "pyproject-nix": "pyproject-nix",
-        "uv2nix": "uv2nix"
+        "letsql": "letsql",
+        "nixpkgs": [
+          "letsql",
+          "nixpkgs"
+        ],
+        "pyproject-build-systems": [
+          "letsql",
+          "pyproject-build-systems"
+        ],
+        "pyproject-nix": [
+          "letsql",
+          "pyproject-nix"
+        ],
+        "uv2nix": [
+          "letsql",
+          "uv2nix"
+        ]
+      }
+    },
+    "rust-overlay": {
+      "inputs": {
+        "nixpkgs": "nixpkgs_2"
+      },
+      "locked": {
+        "lastModified": 1733193245,
+        "narHash": "sha256-nwvKoPi3S6XyliqBRuC+01QFF0k94ZOvnoZtbGi/ObM=",
+        "owner": "oxalica",
+        "repo": "rust-overlay",
+        "rev": "3458f7f946ba61d1a1069aedcc17d7b7616f23cd",
+        "type": "github"
+      },
+      "original": {
+        "owner": "oxalica",
+        "repo": "rust-overlay",
+        "type": "github"
+      }
+    },
+    "systems": {
+      "locked": {
+        "lastModified": 1681028828,
+        "narHash": "sha256-Vy1rq5AaRuLzOxct8nz4T6wlgyUR7zLU309k9mBC768=",
+        "owner": "nix-systems",
+        "repo": "default",
+        "rev": "da67096a3b9bf56a91d16901293e51ba5b49a27e",
+        "type": "github"
+      },
+      "original": {
+        "owner": "nix-systems",
+        "repo": "default",
+        "type": "github"
+      }
+    },
+    "systems_2": {
+      "locked": {
+        "lastModified": 1681028828,
+        "narHash": "sha256-Vy1rq5AaRuLzOxct8nz4T6wlgyUR7zLU309k9mBC768=",
+        "owner": "nix-systems",
+        "repo": "default",
+        "rev": "da67096a3b9bf56a91d16901293e51ba5b49a27e",
+        "type": "github"
+      },
+      "original": {
+        "owner": "nix-systems",
+        "repo": "default",
+        "type": "github"
       }
     },
     "uv2nix": {
       "inputs": {
         "nixpkgs": [
+          "letsql",
           "nixpkgs"
         ],
         "pyproject-nix": [
+          "letsql",
           "pyproject-nix"
         ]
       },
       "locked": {
-        "lastModified": 1733021085,
-        "narHash": "sha256-kh/kP9Iqb7ea1t8Kd7wFX+nrqgk5PybpSoH4MQgZask=",
+        "lastModified": 1733227171,
+        "narHash": "sha256-Rp9dvD+oEsEZlEtCqCRgm8vHdtm7p92hKQGlRuRwvsU=",
         "owner": "pyproject-nix",
         "repo": "uv2nix",
-        "rev": "d66e587c1e2cbf6d1f934e37f2807a9a062f8d0b",
+        "rev": "b93ee39c045c3e544c0bcb33220d0035eeadb38e",
         "type": "github"
       },
       "original": {

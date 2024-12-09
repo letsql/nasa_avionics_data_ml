@@ -2,25 +2,12 @@
   description = "Hello world flake using uv2nix";
 
   inputs = {
-    nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
-
-    pyproject-nix = {
-      url = "github:pyproject-nix/pyproject.nix";
-      inputs.nixpkgs.follows = "nixpkgs";
-    };
-
-    uv2nix = {
-      url = "github:pyproject-nix/uv2nix";
-      inputs.pyproject-nix.follows = "pyproject-nix";
-      inputs.nixpkgs.follows = "nixpkgs";
-    };
-
-    pyproject-build-systems = {
-      url = "github:pyproject-nix/build-system-pkgs";
-      inputs.pyproject-nix.follows = "pyproject-nix";
-      inputs.uv2nix.follows = "uv2nix";
-      inputs.nixpkgs.follows = "nixpkgs";
-    };
+    nixpkgs.follows = "letsql/nixpkgs";
+    # letsql.url = "github:letsql/letsql/5b8430d";
+    letsql.url = "git+file:///home/dan/repos/github/letsql?ref=284bff2";
+    pyproject-nix.follows = "letsql/pyproject-nix";
+    uv2nix.follows = "letsql/uv2nix";
+    pyproject-build-systems.follows = "letsql/pyproject-build-systems";
   };
 
   # Disclaimer: Uv2nix is new and experimental.
@@ -32,6 +19,7 @@
   outputs =
     {
       nixpkgs,
+      letsql,
       uv2nix,
       pyproject-nix,
       pyproject-build-systems,
@@ -39,6 +27,10 @@
     }:
     let
       inherit (nixpkgs) lib;
+      which-python = "310";
+      system = "x86_64-linux";
+      which-letsql = letsql.lib.${system}."letsql-${which-python}";
+      inherit (which-letsql) letsqlCrateWheelSrcOverride;
 
       # Load a uv workspace from a workspace root.
       # Uv2nix treats all uv projects as workspace projects.
@@ -62,10 +54,14 @@
       # This is an additional overlay implementing build fixups.
       # See:
       # - https://pyproject-nix.github.io/uv2nix/FAQ.html
-      pyprojectOverrides = _final: prev: {
+      pyprojectOverrides = final: prev: {
         # https://pyproject-nix.github.io/uv2nix/usage/overriding.html#overriding-sdists-source-builds
         cityhash = prev.cityhash.overrideAttrs (old: {
-          nativeBuildInputs = old.nativeBuildInputs ++ [ prev.setuptools ];
+          nativeBuildInputs =
+            (old.nativeBuildInputs or [ ])
+            ++ (final.resolveBuildSystem {
+              setuptools = [ ];
+            });
         });
         torch = prev.torch.overrideAttrs (old: {
           buildInputs = old.buildInputs ++ [
@@ -74,6 +70,7 @@
             pkgs.linuxPackages.nvidia_x11
           ];
         });
+        letsql = prev.letsql.overrideAttrs letsqlCrateWheelSrcOverride;
         # Implement build fixups here.
       };
 
@@ -91,7 +88,7 @@
       };
 
       # Use Python 3.10 from nixpkgs
-      python = pkgs.python310;
+      python = pkgs."python${which-python}";
 
       # Construct package set
       pythonSet =
@@ -118,7 +115,7 @@
       # - Impurely using uv to manage virtual environments
       # - Pure development using uv2nix to manage virtual environments
       lib.x86_64-linux = {
-        inherit pkgs;
+        inherit pkgs which-letsql;
       };
       devShells.x86_64-linux = {
         # It is of course perfectly OK to keep using an impure virtualenv workflow and only use uv2nix to build packages.
@@ -127,6 +124,7 @@
           packages = [
             python
             pkgs.uv
+            which-letsql.toolchain
           ];
           shellHook = ''
             unset PYTHONPATH
@@ -160,6 +158,7 @@
             packages = [
               virtualenv
               pkgs.uv
+              which-letsql.toolchain
             ];
             shellHook = ''
               # Undo dependency propagation by nixpkgs.
