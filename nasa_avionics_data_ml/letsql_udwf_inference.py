@@ -13,8 +13,29 @@ import letsql as ls
 import nasa_avionics_data_ml.zip_data as ZD
 import nasa_avionics_data_ml.settings as S
 from letsql.common.caching import ParquetSnapshot
+from letsql.common.utils.defer_utils import deferred_read_parquet
 from letsql.expr.relations import into_backend
 from letsql.expr.udf import pyarrow_udwf
+
+
+# def deferred_read_parquet(con, path, table_name=None, **kwargs):
+#     # HAK: work around object_store registration issue: only occurs with csv, not parquet
+#     from letsql.common.utils.defer_utils import gen_name, make_read_kwargs, Read
+#     deferred_read_parquet.method_name = method_name = "read_parquet"
+#     method = getattr(con, method_name)
+#     if table_name is None:
+#         table_name = gen_name(f"letsql-{method_name}")
+#     schema_con = ls.connect()
+#     schema_con.read_csv(path)
+#     schema = schema_con.read_parquet(path).schema()
+#     read_kwargs = make_read_kwargs(method, path, table_name, **kwargs)
+#     return Read(
+#         method_name=method_name,
+#         name=table_name,
+#         schema=schema,
+#         source=con,
+#         read_kwargs=read_kwargs,
+#     ).to_expr()
 
 
 def make_rate_to_parquet(flight_data):
@@ -36,7 +57,7 @@ def asof_join_flight_data(flight_data):
     # HAK: ensure object_storage is loaded
     con.read_csv(next(iter(rate_to_parquet.values())))
     ts = (
-        con.read_parquet(parquet_path, ZD.rate_to_rate_str(rate))
+        deferred_read_parquet(con, parquet_path, ZD.rate_to_rate_str(rate))
         .mutate(flight=ls.literal(flight_data.flight))
         for rate, parquet_path in sorted(rate_to_parquet.items(), key=operator.itemgetter(0), reverse=True)
     )
