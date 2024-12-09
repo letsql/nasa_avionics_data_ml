@@ -241,7 +241,7 @@ class Config:
             (device, *_) = (torch.device(i) for i in range(torch.cuda.device_count()))
         else:
             device = torch.device("cpu")
-            raise("we can't set_device to cpu")
+            # raise ValueError("we can't set_device to cpu")
         return device
 
     @property
