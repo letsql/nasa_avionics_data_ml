@@ -133,7 +133,7 @@ def make_training_udaf(schema, return_type, config, scaleX, scaleT):
     astype = np.float32
 
     training_udaf = agg.pandas_df(
-        expr=ibis.table(schema),
+        schema=schema,
         fn=train_batch(
             config=config,
             scaleX=scaleX,
