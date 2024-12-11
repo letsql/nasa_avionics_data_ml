@@ -63,18 +63,18 @@
         "uv2nix": "uv2nix"
       },
       "locked": {
-        "lastModified": 1733661203,
-        "narHash": "sha256-8g6j1tYm4CbF/r34Rpq+PxC2E63mdkm+cO19HAGeBfk=",
-        "ref": "284bff2",
-        "rev": "284bff2da62327b8ba0b1d4819a096e4b55a2f59",
-        "revCount": 350,
-        "type": "git",
-        "url": "file:///home/dan/repos/github/letsql"
+        "lastModified": 1733919668,
+        "narHash": "sha256-MytOfQvO6lbWogOPdZIXc1oPgcF4E49I/nMAmSq+4Ao=",
+        "owner": "letsql",
+        "repo": "letsql",
+        "rev": "3252bd3920eb088b648bb1febf12739810a94765",
+        "type": "github"
       },
       "original": {
-        "ref": "284bff2",
-        "type": "git",
-        "url": "file:///home/dan/repos/github/letsql"
+        "owner": "letsql",
+        "ref": "ref/nix-flake",
+        "repo": "letsql",
+        "type": "github"
       }
     },
     "nix-utils": {

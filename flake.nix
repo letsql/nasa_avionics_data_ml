@@ -3,8 +3,7 @@
 
   inputs = {
     nixpkgs.follows = "letsql/nixpkgs";
-    # letsql.url = "github:letsql/letsql/5b8430d";
-    letsql.url = "git+file:///home/dan/repos/github/letsql?ref=284bff2";
+    letsql.url = "github:letsql/letsql/ref/nix-flake";
     pyproject-nix.follows = "letsql/pyproject-nix";
     uv2nix.follows = "letsql/uv2nix";
     pyproject-build-systems.follows = "letsql/pyproject-build-systems";
