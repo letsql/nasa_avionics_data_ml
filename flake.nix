@@ -116,7 +116,7 @@
       lib.x86_64-linux = {
         inherit pkgs which-letsql;
       };
-      devShells.x86_64-linux = {
+      devShells.x86_64-linux = rec {
         # It is of course perfectly OK to keep using an impure virtualenv workflow and only use uv2nix to build packages.
         # This devShell simply adds Python and undoes the dependency leakage done by Nixpkgs Python infrastructure.
         impure = pkgs.mkShell {
@@ -166,6 +166,7 @@
               export REPO_ROOT=$(git rev-parse --show-toplevel)
             '';
           };
+        default = uv2nix;
       };
     };
 }
