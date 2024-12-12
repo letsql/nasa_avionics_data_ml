@@ -39,4 +39,3 @@ torch = [
   # { index = "pytorch-cu118", marker = "platform_system != 'Darwin'"},
   { index = "pytorch-cu117" },
 ]
-letsql = { git = "file:///home/dan/repos/github/letsql" }
