@@ -301,6 +301,11 @@ def pyarrow_to_sequence_tensor(arrow_values, seq_length, scaler, astype=np.float
     return pandas_to_sequence_tensor(table.to_pandas(), seq_length, scaler, astype)
 
 
+def read_scales(scales_path=S.scales_path):
+    (scaleX, scaleT) = pickle.loads(scales_path.read_bytes())
+    return (scaleX, scaleT)
+
+
 def read_model_and_scales(model_path=S.model_path, scales_path=S.scales_path):
 
     def read_model(model_path, device=torch.device("cpu")):
@@ -318,5 +323,5 @@ def read_model_and_scales(model_path=S.model_path, scales_path=S.scales_path):
 
 
     model = read_model(model_path)
-    (scaleX, scaleT) = pickle.loads(scales_path.read_bytes())
+    (scaleX, scaleT) = read_scales(scales_path)
     return (model, scaleX, scaleT)

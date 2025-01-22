@@ -28,11 +28,19 @@ from letsql.expr.udf import (
 gpu_lock = Lock()
 
 
+def make_rate_to_url(flight_data):
+    return {
+        rate: (
+            "https://nasa-avionics-data-ml.s3.us-east-2.amazonaws.com"
+            f"/{flight_data.parquet_dir.name}/{flight_data.flight}.{ZD.rate_to_rate_str(rate)}.parquet"
+        )
+        for rate in ZD.rate_to_columns
+    }
+
+
 def make_rate_to_parquet(flight_data):
     return {
         rate: (
-            # "https://nasa-avionics-data-ml.s3.us-east-2.amazonaws.com"
-            # f"/{flight_data.parquet_dir.name}/{flight_data.flight}.{ZD.rate_to_rate_str(rate)}.parquet"
             flight_data.parquet_dir.joinpath(f"{flight_data.flight}.{ZD.rate_to_rate_str(rate)}.parquet")
         )
         for rate in ZD.rate_to_columns
@@ -157,7 +165,7 @@ if __name__ == "__main__":
 
     from nasa_avionics_data_ml.lib import (
         Config,
-        read_model_and_scales,
+        read_scales,
     )
 
     (order_by, group_by) = ("time", "flight")
@@ -166,8 +174,7 @@ if __name__ == "__main__":
     # return_type = ibis.dtype("float64")
     return_type = ibis.dtype(pa_return_type)
     (config, *_) = Config.get_debug_configs()
-    (_, scaleX, scaleT) = read_model_and_scales()
-    # (seq_length, xlist) = (config.seq_length, config.xlist)
+    (scaleX, scaleT) = read_scales()
     training_udaf, *rest = make_training_udaf(
         ibis.schema({name: float for names in (config.x_names, config.t_names) for name in names}),
         return_type,
