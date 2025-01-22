@@ -17,6 +17,7 @@ from attr import (
 
 
 default_data_dir = pathlib.Path("/mnt/nasa-data-download/data")
+zip_url_prefix = "https://c3.ndc.nasa.gov/dashlink/static/media/dataset/"
 
 
 rate_to_rate_str = toolz.compose(operator.methodcaller("replace", ".", "p"), str)
@@ -210,9 +211,28 @@ class TailData:
         yield from (cls(p) for p in sorted(data_dir.iterdir()) if p.suffix == ".zip")
 
     @classmethod
+    def ensure_zip(cls, zip_name, data_dir=default_data_dir):
+        zip_path = data_dir.joinpath(zip_name)
+        if not zip_path.exists():
+            import requests
+            url = zip_url_prefix + zip_name
+            response = requests.get(url)
+            response.raise_for_status()
+            zip_path.write_bytes(response.content)
+        return cls(zip_path)
+
+    @classmethod
+    def ensure_all_zips(cls, data_dir=default_data_dir):
+        from nasa_avionics_data_ml.zip_names import zip_names
+        zip_names = tuple(zip_name for zip_name in zip_names if not data_dir.joinpath(zip_name).exists())
+        for (i, zip_name) in enumerate(zip_names):
+            cls.ensure_zip(zip_name, data_dir=data_dir)
+            print(f"{datetime.datetime.now()} :: done :: {i} / {len(zip_names)} :: {zip_name}")
+
+    @classmethod
     def ensure_all_parquets(cls, data_dir=default_data_dir):
         dct = {}
-        tail_datas = cls.gen_from_data_dir(data_dir=data_dir)
+        tail_datas = tuple(cls.gen_from_data_dir(data_dir=data_dir))
         for (i, tail_data) in enumerate(tail_datas):
             dct[tail_data] = tail_data.ensure_parquets()
             print(f"{datetime.datetime.now()} :: done :: {i} / {len(tail_datas)} :: {tail_data.zip_path}")
