@@ -1,6 +1,5 @@
 import operator
 import pickle
-import pprint
 import time
 import warnings
 from threading import Lock
@@ -46,8 +45,6 @@ def asof_join_flight_data(flight_data, airborne_only=True):
     rate_to_parquet = make_rate_to_parquet(flight_data)
 
     con = ls.connect()
-    # HAK: ensure object_storage is loaded
-    con.read_csv(next(iter(rate_to_parquet.values())))
     ts = (
         deferred_read_parquet(con, parquet_path, ZD.rate_to_rate_str(rate))
         .mutate(flight=ls.literal(flight_data.flight))
@@ -155,7 +152,6 @@ def make_training_udaf(schema, return_type, config, scaleX, scaleT):
 
 if __name__ == "__main__":
     import itertools
-    import pprint
 
     import pandas as pd
 
