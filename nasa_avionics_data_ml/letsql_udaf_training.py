@@ -75,13 +75,13 @@ def union_cached_asof_joined_flight_data(*flight_datas, cls=ParquetSnapshot):
 
 
 iter_idx = -1
-pa_return_type = pa.scalar({
-    "iter_idx": iter_idx,
-    "batch_loss": float(),
-    "model": pickle.dumps(None),
-    "start_time": time.perf_counter(),
-    "stop_time": time.perf_counter(),
-}).type
+return_type = ibis.schema({
+    "iter_idx": type(iter_idx),
+    "batch_loss": float,
+    "model": bytes,
+    "start_time": float,
+    "stop_time": float,
+}).as_struct()
 
 
 @toolz.curry
@@ -158,52 +158,61 @@ def make_training_udaf(schema, return_type, config, scaleX, scaleT):
     return training_udaf, model, loss_func, opt, error_trace
 
 
+def splat_struct(expr, col, do_drop=True):
+    expr = expr.mutate(**{field: expr[col][field] for field in expr[col].fields})
+    if do_drop:
+        expr = expr.drop(col)
+    return expr
+
+
 if __name__ == "__main__":
     import itertools
-
-    import pandas as pd
 
     from nasa_avionics_data_ml.lib import (
         Config,
         read_scales,
     )
 
-    (order_by, group_by) = ("time", "flight")
-    tail = "Tail_652_1"
-    n_flights = 8
 
-    return_type = ibis.dtype(pa_return_type)
+    tail = "Tail_652_1"
+    n_flights = 64
+
     (config, *_) = Config.get_debug_configs()
     (scaleX, scaleT) = read_scales()
-    training_udaf, *rest = make_training_udaf(
-        ibis.schema({name: float for names in (config.x_names, config.t_names) for name in names}),
+    (training_udaf, model, *rest) = make_training_udaf(
+        ibis.schema({name: float for name in (*config.x_names, *config.t_names)}),
         return_type,
         config,
         scaleX,
         scaleT,
     )
-    (model, loss_func, opt, error_trace) = rest
 
     tail_data = next(td for td in ZD.TailData.gen_from_data_dir() if td.tail == tail)
-    (flight_data, *_) = flight_datas = tuple(itertools.islice(
+    flight_datas = tuple(itertools.islice(
         tail_data.gen_parquet_exists(),
         n_flights,
     ))
-    expr = union_cached_asof_joined_flight_data(*flight_datas)
-    with_batch_loss = expr.group_by("flight").agg(batch_loss=training_udaf.on_expr(expr))
+    data_expr = union_cached_asof_joined_flight_data(*flight_datas)
+    model_expr = (
+        data_expr
+        .pipe(lambda t, col="col": (
+            t
+            .group_by("flight")
+            .agg(**{col: training_udaf.on_expr(t)})
+            .pipe(splat_struct, col)
+        ))
+    )
 
-    with Timer("first expr execution"):
+    if not any(p for storage in data_expr.ls.storages for p in storage.path.iterdir()):
+        with Timer("data_expr caching"):
+            with warnings.catch_warnings():
+                warnings.simplefilter("ignore")
+                print(f"row count is {ls.execute(data_expr.count())}")
+    with Timer("data_expr cached read"):
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
-            print(f"row count is {ls.execute(expr.count())}")
-    with Timer("second expr execution"):
+            print(f"row count is {ls.execute(data_expr.count())}")
+    with Timer("model training"):
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
-            print(f"row count is {ls.execute(expr.count())}")
-    with Timer("first full run"):
-        with warnings.catch_warnings():
-            warnings.simplefilter("ignore")
-            batch_loss_df = (
-                ls.execute(with_batch_loss)
-                .pipe(lambda t: t.drop(columns="batch_loss").join(t.batch_loss.apply(pd.Series)))
-            )
+            df = ls.execute(model_expr)
