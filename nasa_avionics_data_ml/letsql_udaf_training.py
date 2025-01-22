@@ -1,7 +1,6 @@
 import operator
 import pickle
 import time
-import warnings
 from threading import Lock
 
 import ibis
@@ -9,7 +8,6 @@ import numpy as np
 import pyarrow as pa
 import toolz
 import torch
-from codetiming import Timer
 
 import letsql as ls
 from nasa_avionics_data_ml.lib import (
@@ -167,6 +165,9 @@ def splat_struct(expr, col, do_drop=True):
 
 if __name__ == "__main__":
     import itertools
+    import warnings
+
+    from codetiming import Timer
 
     from nasa_avionics_data_ml.lib import (
         Config,
