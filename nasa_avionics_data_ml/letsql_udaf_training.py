@@ -170,8 +170,8 @@ if __name__ == "__main__":
 
     (order_by, group_by) = ("time", "flight")
     tail = "Tail_652_1"
+    n_flights = 8
 
-    # return_type = ibis.dtype("float64")
     return_type = ibis.dtype(pa_return_type)
     (config, *_) = Config.get_debug_configs()
     (scaleX, scaleT) = read_scales()
@@ -184,17 +184,14 @@ if __name__ == "__main__":
     )
     (model, loss_func, opt, error_trace) = rest
 
-    # get 8 flights from tail 652_1
+    tail_data = next(td for td in ZD.TailData.gen_from_data_dir() if td.tail == tail)
     (flight_data, *_) = flight_datas = tuple(itertools.islice(
-        next(td for td in ZD.TailData.gen_from_data_dir() if td.tail == tail).gen_parquet_exists(),
-        1,
-        64,
+        tail_data.gen_parquet_exists(),
+        n_flights,
     ))
-    if not all(path.exists() for flight_data in flight_datas for path in make_rate_to_parquet(flight_data).values()):
-        raise ValueError
-    single_expr = asof_join_flight_data(flight_data)
     expr = union_cached_asof_joined_flight_data(*flight_datas)
     with_batch_loss = expr.group_by("flight").agg(batch_loss=training_udaf.on_expr(expr))
+
     with Timer("first expr execution"):
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
@@ -210,19 +207,3 @@ if __name__ == "__main__":
                 ls.execute(with_batch_loss)
                 .pipe(lambda t: t.drop(columns="batch_loss").join(t.batch_loss.apply(pd.Series)))
             )
-
-    # we need to make sure we can inject the output_order into datafusion
-
-    # pprint.pprint(make_rate_to_parquet(flight_data))
-    # print(ls.to_sql(single_expr))
-    # with warnings.catch_warnings():
-    #     warnings.simplefilter("ignore")
-    #     from_letsql = ls.execute(with_batch_loss.order_by(group_by, order_by))
-    # from_manual = (
-    #     do_manual_batch(expr, model, config.seq_length, scaleX, scaleT, return_type, config.xlist, group_by, order_by)
-    #     .sort_values([group_by, order_by], ignore_index=True)
-    # )
-
-    # assert from_manual.equals(from_letsql)
-
-    # i might need to clear the gpu memory after each iteration
