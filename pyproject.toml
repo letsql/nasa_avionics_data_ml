@@ -10,7 +10,7 @@ dependencies = [
     "dask>=2024.12.0",
     "duckdb",
     "ipython",
-    "letsql>=0.1.10",
+    "letsql==0.1.11",
     "matplotlib",
     "notebook",
     "numpy<2",
